@@ -1,7 +1,7 @@
 general:
   experiment_tag: 'lstm_dqn_'
   env_id: 'twcc_easy_level10_gamesize100_step50_seed9_train'
-  run_test: True
+  run_test: False
   valid_env_id: 'twcc_easy_level10_gamesize10_step50_seed9_validation'
   test_env_id: ['twcc_easy_level5_gamesize10_step50_seed1_test',
                 'twcc_easy_level10_gamesize10_step50_seed0_test',
@@ -34,7 +34,7 @@ general:
 
 training:
   scheduling:
-    batch_size: 10
+    batch_size: 1
     test_batch_size: 10
     epoch: 2000
     model_checkpoint_path: 'saved_models/model1.pt'
