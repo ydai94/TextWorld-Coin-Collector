@@ -17,11 +17,15 @@ from helpers.generic import get_experiment_dir, dict2list
 from helpers.setup_logger import setup_logging, log_git_commit
 from test_agent import test
 logger = logging.getLogger(__name__)
-from textworld.core import EnvInfos
+
 import gym
 import gym_textworld  # Register all textworld environments.
 
 import textworld
+
+import jericho
+import re
+from collections import defaultdict
 
 class TemplateActionGeneratorJeri:
     '''
@@ -136,11 +140,6 @@ class TemplateActionGeneratorJeri:
                                     template_idx, [o1_id, o2_id]))
         return actions
 
-import jericho
-import textworld
-import re
-from collections import defaultdict
-
 def _load_bindings_from_tw(state, story_file, seed):
     bindings = {}
     g1 = [re.sub('{.*?}', 'OBJ', s) for s in state.command_templates]
@@ -158,11 +157,13 @@ def _load_bindings_from_tw(state, story_file, seed):
     bindings['walkthrough'] = bindings['minimal_actions']
     return bindings
 
+
 class JeriWorld:
-    def __init__(self, story_file, seed=None, style='jericho', infos = None):
-        self.jeri_style = style.lower() == 'jericho'
-        if self.jeri_style:
-            self._env = textworld.start(story_file, infos=infos)
+    def __init__(self, story_file, seed=None, style='jericho', infos = None, env_id = None):
+        self.style = style.lower()
+        if self.style == 'jericho' and infos == None:
+            info = EnvInfos(objective=True,description=True,inventory=True,feedback=True,intermediate_reward=True,admissible_commands=True)
+            self._env = textworld.start(story_file, infos=info)
             state = self._env.reset()
             self.tw_games = True
             self._seed = seed
@@ -179,15 +180,18 @@ class JeriWorld:
                 self._world_changed = self._env._jericho._world_changed
                 self.act_gen = TemplateActionGeneratorJeri(self.bindings)
                 self.seed(seed)
-        else:
+        elif self.style == 'textworld':
             self._env = textworld.start(story_file, infos=infos)
+        else:
+            self._env = gym.make(env_id)
+            self.observation_space = self._env.observation_space
 
     def __del__(self):
         del self._env
  
     
     def reset(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 state = self._env.reset()
                 raw = state['description']
@@ -197,7 +201,7 @@ class JeriWorld:
             return self._env.reset()
     
     def load(self, story_file, seed=None):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 self._env.load(story_file)
             else:
@@ -206,16 +210,16 @@ class JeriWorld:
             self._env.load(story_file)
 
     def step(self, action):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
-                old_score = self._env.state.score
-                next_state = self._env.step(action)[0]
+                state = self._env.step(action)
                 s_action = re.sub(r'\s+', ' ', action.strip())
-                score = self._env.state.score
-                reward = score - old_score
+                # score = self._env.state.score
+                # reward = score - old_score
+                reward = state[0]['intermediate_reward']
                 self._world_changed = self._env._jericho._world_changed
-                return next_state.description, reward, (next_state.lost or next_state.won),\
-                  {'moves':next_state.moves, 'score':next_state.score}
+                return state[0].description, reward, state[2],\
+                  {'moves':state[0].moves, 'score':state[1]}
             else:
                 self._world_changed = self._env._world_changed
             return self._env.step(action)
@@ -223,13 +227,13 @@ class JeriWorld:
             return self._env.step(action)
 
     def bindings(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             return self.bindings
         else:
             return None
 
     def _emulator_halted(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return self._env._env._emulator_halted()
             return self._env._emulator_halted()
@@ -237,7 +241,7 @@ class JeriWorld:
             return None
 
     def game_over(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 self._env.state['lost']
             return self._env.game_over()
@@ -245,7 +249,7 @@ class JeriWorld:
             return None
 
     def victory(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 self._env.state['won']
             return self._env.victory()
@@ -253,23 +257,32 @@ class JeriWorld:
             return None
 
     def seed(self, seed=None):
-        if self.jeri_style:
+        if self.style == 'jericho':
             self._seed = seed
             return self._env.seed(seed)
         else:
-            return None
+            return self._env.seed(seed)
     
-    def close(self):
-        if self.jeri_style:
-            self._env.close()
+    def render(self, mode="human"):
+        if self.style == 'gym':
+            return self._env.render(mode)
         else:
             pass
+
+    def unwrapped(self):
+        return self._env.unwrapped()
+
+    def close(self):
+        if self.style == 'jericho':
+            self._env.close()
+        else:
+            self._env.close()
 
     def copy(self):
         return self._env.copy()
 
     def get_walkthrough(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return self._env.state['extra.walkthrough']
             return self._env.get_walkthrough()
@@ -277,7 +290,7 @@ class JeriWorld:
             return None
 
     def get_score(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return self._env.state['score']
             return self._env.get_score()
@@ -285,7 +298,7 @@ class JeriWorld:
             return None
 
     def get_dictionary(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 state = self._env.state
                 return state.entities + state.verbs
@@ -295,7 +308,7 @@ class JeriWorld:
             return state.entities + state.verbs
 
     def get_state(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return self._env._jericho.get_state()
             return self._env.get_state
@@ -303,7 +316,7 @@ class JeriWorld:
             return None
     
     def set_state(self, state):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 self._env._jericho.set_state(state)
             else:
@@ -312,7 +325,7 @@ class JeriWorld:
             pass
 
     def get_valid_actions(self, use_object_tree=True, use_ctypes=True, use_parallel=True):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return self._env.state['admissible_commands']
             return self._env.get_valid_actions(use_object_tree, use_ctypes, use_parallel)
@@ -339,7 +352,7 @@ class JeriWorld:
         Zork1's brass latern which may be referred to either as *brass* or *lantern*.\
         This method groups all such aliases together into a list for each object.
         """
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 objs = set()
                 state = self.get_state()
@@ -385,7 +398,7 @@ class JeriWorld:
             return None
 
     def find_valid_actions(self, possible_acts=None):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 diff2acts = {}
                 state = self.get_state()
@@ -416,7 +429,7 @@ class JeriWorld:
 
     def _score_object_names(self, interactive_objs):
         """ Attempts to choose a sensible name for an object, typically a noun. """
-        if self.jeri_style:
+        if self.style == 'jericho':
             def score_fn(obj):
                 score = -.01 * len(obj[0])
                 if obj[1] == 'NOUN':
@@ -437,7 +450,7 @@ class JeriWorld:
             return None
 
     def get_world_state_hash(self):
-        if self.jeri_style:
+        if self.style == 'jericho':
             if self.tw_games:
                 return None
             else:
@@ -445,18 +458,17 @@ class JeriWorld:
         else:
             return None
 
-
 def train(config):
     # train env
     print('Setting up TextWorld environment...')
     batch_size = config['training']['scheduling']['batch_size']
-    '''env_id = gym_textworld.make_batch(env_id=config['general']['env_id'],
+    env_id = gym_textworld.make_batch(env_id=config['general']['env_id'],
                                       batch_size=batch_size,
                                       parallel=True)
-'''
-    info = EnvInfos(objective=True,description=True,inventory=True,feedback=True,intermediate_reward=True,admissible_commands=True)
-    env = JeriWorld('/content/tw_games/coin_collector.z8', infos=info, style = 'textworld')
-    env.reset()
+    env = JeriWorld(None, style='gym', env_id=env_id)
+    #env = gym.make(env_id)
+    env.seed(config['general']['random_seed'])
+
     # valid and test env
     run_test = config['general']['run_test']
     if run_test:
@@ -465,7 +477,8 @@ def train(config):
         valid_env_name = config['general']['valid_env_id']
 
         valid_env_id = gym_textworld.make_batch(env_id=valid_env_name, batch_size=test_batch_size, parallel=True)
-        valid_env = gym.make(valid_env_id)
+        valid_env = JeriWorld(None, style='gym', env_id=valid_env_id)
+        #valid_env = gym.make(valid_env_id)
         valid_env.seed(config['general']['random_seed'])
 
         # test
@@ -473,7 +486,8 @@ def train(config):
         assert isinstance(test_env_name_list, list)
 
         test_env_id_list = [gym_textworld.make_batch(env_id=item, batch_size=test_batch_size, parallel=True) for item in test_env_name_list]
-        test_env_list = [gym.make(test_env_id) for test_env_id in test_env_id_list]
+        #test_env_list = [gym.make(test_env_id) for test_env_id in test_env_id_list]
+        test_env_list = [JeriWorld(None, style='gym', env_id=test_env_id) for test_env_id in test_env_id_list]
         for i in range(len(test_env_list)):
             test_env_list[i].seed(config['general']['random_seed'])
     print('Done.')
@@ -496,7 +510,7 @@ def train(config):
     replay_memory_capacity = config['general']['replay_memory_capacity']
     replay_memory_priority_fraction = config['general']['replay_memory_priority_fraction']
 
-    word_vocab = env.get_dictionary()
+    word_vocab = dict2list(env.observation_space.id2w)
     word2id = {}
     for i, w in enumerate(word_vocab):
         word2id[w] = i
@@ -549,12 +563,11 @@ def train(config):
     for epoch in range(config['training']['scheduling']['epoch']):
 
         agent.model.train()
-        state = env.reset()
-        obs, infos = state.feedback, state
+        obs, infos = env.reset()
         agent.reset(infos)
-        print_command_string, print_rewards = [[]], [[]]
-        print_interm_rewards = [[]]
-        print_rc_rewards = [[]]
+        print_command_string, print_rewards = [[] for _ in infos], [[] for _ in infos]
+        print_interm_rewards = [[] for _ in infos]
+        print_rc_rewards = [[] for _ in infos]
 
         dones = [False] * batch_size
         rewards = None
@@ -575,8 +588,7 @@ def train(config):
         while not all(dones):
             agent.model.train()
             v_idx, n_idx, chosen_strings, curr_ras_hidden, curr_ras_cell = agent.generate_one_command(input_description, curr_ras_hidden, curr_ras_cell, epsilon=epsilon)
-            state = env.step(chosen_strings[0])
-            obs, rewards, dones, infos = state[0].feedback, [state[1]], state[2], state[0]
+            obs, rewards, dones, infos = env.step(chosen_strings)
             curr_observation_strings = agent.get_observation_strings(infos)
             if provide_prev_action:
                 prev_actions = chosen_strings
@@ -588,16 +600,16 @@ def train(config):
             agent.revisit_counting_rewards.append(revisit_counting_rewards)
             revisit_counting_rewards = [float(format(item, ".3f")) for item in revisit_counting_rewards]
 
-            for i in range(batch_size):
+            for i in range(len(infos)):
                 print_command_string[i].append(chosen_strings[i])
-                print_rewards[i].append(rewards)
-                print_interm_rewards[i].append(infos["intermediate_reward"])
+                print_rewards[i].append(rewards[i])
+                print_interm_rewards[i].append(infos[i]["intermediate_reward"])
                 print_rc_rewards[i].append(revisit_counting_rewards[i])
             if type(dones) is bool:
                 dones = [dones] * batch_size
             agent.rewards.append(rewards)
             agent.dones.append(dones)
-            agent.intermediate_rewards.append([infos["intermediate_reward"]])
+            agent.intermediate_rewards.append([info["intermediate_reward"] for info in infos])
             # computer rewards, and push into replay memory
             rewards_np, rewards_pt, mask_np, mask_pt, memory_mask = agent.compute_reward(revisit_counting_lambda=revisit_counting_lambda, revisit_counting=revisit_counting)
 
