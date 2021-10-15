@@ -161,9 +161,10 @@ def _load_bindings_from_tw(state, story_file, seed):
 class JeriWorld:
     def __init__(self, story_file, seed=None, style='jericho', infos = None, env_id = None):
         self.style = style.lower()
-        if self.style == 'jericho' and infos == None:
-            info = EnvInfos(objective=True,description=True,inventory=True,feedback=True,intermediate_reward=True,admissible_commands=True)
-            self._env = textworld.start(story_file, infos=info)
+        if self.style == 'jericho':
+            if infos == None:
+                infos = EnvInfos(objective=True,description=True,inventory=True,feedback=True,intermediate_reward=True,admissible_commands=True)
+            self._env = textworld.start(story_file, infos=infos)
             state = self._env.reset()
             self.tw_games = True
             self._seed = seed
